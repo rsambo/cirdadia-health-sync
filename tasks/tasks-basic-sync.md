@@ -84,17 +84,17 @@ Update the file after completing each sub-task, not just after completing an ent
   - [x] 5.8 Add permission request handling with UI feedback
   - [x] 5.9 Add "Install Health Connect" prompt when not available
 
-- [ ] 6.0 Integrate and test end-to-end
+- [x] 6.0 Integrate and test end-to-end
   - [x] 6.1 Update MainActivity to use SyncScreen and SyncViewModel
   - [x] 6.2 Wire up Health Connect permission request flow in Activity
-  - [ ] 6.3 Set up test backend (see Testing Notes below)
-  - [ ] 6.4 Add sample step data to Health Connect on emulator/device
-  - [ ] 6.5 Test Health Connect permission request flow
-  - [ ] 6.6 Test reading steps data from Health Connect
-  - [ ] 6.7 Test sync button - verify data reaches backend
-  - [ ] 6.8 Verify success state displays record count and timestamp
-  - [ ] 6.9 Test error states: stop backend and verify error message shows
-  - [ ] 6.10 Test edge cases: no Health Connect, permission denied
+  - [x] 6.3 Set up test backend (see Testing Notes below)
+  - [x] 6.4 Add sample step data to Health Connect on emulator/device
+  - [x] 6.5 Test Health Connect permission request flow
+  - [x] 6.6 Test reading steps data from Health Connect
+  - [x] 6.7 Test sync button - verify data reaches backend
+  - [x] 6.8 Verify success state displays record count and timestamp
+  - [x] 6.9 Test error states: stop backend and verify error message shows
+  - [x] 6.10 Test edge cases: no Health Connect, permission denied
 
 ## Testing Notes
 
@@ -125,8 +125,8 @@ On the emulator/device:
 4. Alternatively, use a fitness app (like Google Fit) that writes to Health Connect
 
 ### Verification Checklist
-- [ ] Backend is running and accessible
-- [ ] Health Connect has sample step data
-- [ ] App granted Health Connect permission
-- [ ] Tap Sync → see "Sync successful! X records"
-- [ ] Check backend logs/database to confirm data arrived
+- [x] Backend is running and accessible
+- [x] Health Connect has sample step data
+- [x] App granted Health Connect permission
+- [x] Tap Sync → see "Sync successful! X records"
+- [x] Check backend logs/database to confirm data arrived
