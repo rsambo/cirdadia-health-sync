@@ -1,3 +1,23 @@
 <resources>
-    <string name="app_name">Circadia Health Sync</string>
+    <string name="app_name">Circadia</string>
+
+    <!-- Sync Screen -->
+    <string name="sync_button">Sync Health Data</string>
+    <string name="syncing">Syncing…</string>
+    <string name="sync_ready_message">Tap the button below to sync your health data with Circadia.</string>
+    <string name="sync_in_progress">Syncing your health data…</string>
+    <string name="sync_success_title">Sync Successful!</string>
+    <string name="sync_success_records">%d records synced</string>
+    <string name="sync_success_timestamp">Last synced: %s</string>
+    <string name="sync_error_title">Sync Failed</string>
+
+    <!-- Permissions -->
+    <string name="permission_required_title">Permission Required</string>
+    <string name="permission_required_message">Circadia needs permission to read your step data from Health Connect.</string>
+    <string name="grant_permission">Grant Permission</string>
+
+    <!-- Health Connect -->
+    <string name="health_connect_required_title">Health Connect Required</string>
+    <string name="health_connect_required_message">Please install Health Connect to sync your health data.</string>
+    <string name="install_health_connect">Install Health Connect</string>
 </resources>
