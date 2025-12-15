@@ -13,6 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -21,10 +22,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.circadia.healthsync.data.model.CachedSyncData
+import com.circadia.healthsync.ui.utils.TimeFormatters
 
 /**
  * Main sync screen composable.
- * Displays the app title, sync button, and status area.
+ * Displays the status area with sync information.
  */
 @Composable
 fun SyncScreen(
@@ -53,43 +55,30 @@ fun SyncScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        // App Title
-        Text(
-            text = "Circadia",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 48.dp, bottom = 48.dp)
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Sync Button Area
-        SyncButton(
+        // Action buttons for permission/install (only when needed)
+        ActionButton(
             uiState = uiState,
-            onSyncClick = { viewModel.sync() },
             onRequestPermission = { onRequestPermission(viewModel.getPermissionRequestIntent()) },
             onInstallHealthConnect = { onInstallHealthConnect(viewModel.getInstallHealthConnectIntent()) }
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Status Area
         StatusCard(uiState = uiState)
-
-        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
 /**
- * Sync button that adapts based on current UI state.
+ * Action button for permission/install actions only.
+ * Only shows when user action is required.
  */
 @Composable
-private fun SyncButton(
+private fun ActionButton(
     uiState: SyncUiState,
-    onSyncClick: () -> Unit,
     onRequestPermission: () -> Unit,
     onInstallHealthConnect: () -> Unit
 ) {
@@ -99,7 +88,7 @@ private fun SyncButton(
                 onClick = onRequestPermission,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp),
+                    .height(56.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondary
                 )
@@ -107,12 +96,12 @@ private fun SyncButton(
                 Icon(
                     imageVector = Icons.Default.Warning,
                     contentDescription = null,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "Grant Permission",
-                    fontSize = 18.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -122,7 +111,7 @@ private fun SyncButton(
                 onClick = onInstallHealthConnect,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp),
+                    .height(56.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.tertiary
                 )
@@ -130,94 +119,18 @@ private fun SyncButton(
                 Icon(
                     imageVector = Icons.Default.Warning,
                     contentDescription = null,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "Install Health Connect",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        is SyncUiState.NotSupported -> {
-            Button(
-                onClick = { },
-                enabled = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            ) {
-                Text(
-                    text = "Device Not Supported",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        is SyncUiState.Syncing -> {
-            Button(
-                onClick = { },
-                enabled = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    strokeWidth = 3.dp
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Syncing...",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        is SyncUiState.Refreshing -> {
-            // Show syncing button but disabled while refreshing
-            Button(
-                onClick = { },
-                enabled = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    strokeWidth = 3.dp
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Syncing...",
-                    fontSize = 18.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
         }
         else -> {
-            // Ready, Success, or Error state - show Sync button
-            Button(
-                onClick = onSyncClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(28.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Sync Data",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+            // No action button needed for other states
         }
     }
 }
@@ -419,12 +332,29 @@ private fun CachedDataDisplay(
         // Step count
         Text(
             text = "${cachedData.totalStepCount.formatWithCommas()} steps",
-            fontSize = 20.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        // Step diff (if available and non-zero)
+        cachedData.stepDiff?.let { diff ->
+            Spacer(modifier = Modifier.height(4.dp))
+            val diffText = if (diff > 0) "+${diff.formatWithCommas()}" else diff.formatWithCommas()
+            val diffColor = when {
+                diff > 0 -> Color(0xFF4CAF50)  // Green
+                diff < 0 -> Color(0xFFF44336)  // Red
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(
+                text = "$diffText steps",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = diffColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Record count
         Text(
@@ -451,8 +381,10 @@ private fun CachedDataDisplay(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
+                // Use relative timestamp
+                val relativeTime = TimeFormatters.formatRelativeTimestamp(cachedData.syncTimestamp)
                 Text(
-                    text = "Last synced: ${cachedData.formattedTimestamp}",
+                    text = "Last synced: $relativeTime",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -465,6 +397,6 @@ private fun CachedDataDisplay(
  * Extension function to format a Long with comma separators.
  */
 private fun Long.formatWithCommas(): String {
-    return String.format("%,d", this)
+    return String.format(java.util.Locale.US, "%,d", this)
 }
 

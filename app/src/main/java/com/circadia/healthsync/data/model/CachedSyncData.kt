@@ -12,6 +12,10 @@ data class CachedSyncData(
     /** ISO 8601 timestamp of when the data was synced */
     val syncTimestamp: String,
     /** Formatted timestamp for display (e.g., "Dec 15, 2025 at 2:30 PM") */
-    val formattedTimestamp: String
+    val formattedTimestamp: String,
+    /** Previous step count before this sync (for calculating diff) */
+    val previousStepCount: Long? = null,
+    /** Step difference from previous sync (positive = gained, negative = lost) */
+    val stepDiff: Long? = null
 )
 

@@ -101,12 +101,22 @@ class SyncRepository(
                 val totalStepCount = dailySteps.sumOf { it.count }
                 Log.d(TAG, "performSync: Success! Total steps: $totalStepCount, records: ${body.recordCount}")
 
-                // Create cached data
+                // Calculate step diff from previous sync
+                val previousStepCount = cachedData?.totalStepCount
+                val stepDiff = if (previousStepCount != null) {
+                    val diff = totalStepCount - previousStepCount
+                    if (diff != 0L) diff else null  // Only store non-zero diff
+                } else null
+                Log.d(TAG, "performSync: Previous count: $previousStepCount, Diff: $stepDiff")
+
+                // Create cached data with diff
                 val newCachedData = CachedSyncData(
                     totalStepCount = totalStepCount,
                     recordCount = body.recordCount,
                     syncTimestamp = now.toString(),
-                    formattedTimestamp = formatTimestamp(now)
+                    formattedTimestamp = formatTimestamp(now),
+                    previousStepCount = previousStepCount,
+                    stepDiff = stepDiff
                 )
 
                 // Step 6: Store sync timestamp and cached data

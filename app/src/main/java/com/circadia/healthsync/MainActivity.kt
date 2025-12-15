@@ -7,14 +7,31 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.circadia.healthsync.ui.sync.SyncScreen
+import com.circadia.healthsync.ui.sync.SyncUiState
 import com.circadia.healthsync.ui.sync.SyncViewModel
 import com.circadia.healthsync.ui.theme.CircadiaHealthSyncTheme
 
@@ -34,14 +51,61 @@ class MainActivity : ComponentActivity() {
         // Health Connect availability will be checked by ViewModel on resume
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             CircadiaHealthSyncTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    val syncViewModel: SyncViewModel = viewModel()
+                val syncViewModel: SyncViewModel = viewModel()
+                val uiState by syncViewModel.uiState.collectAsState()
 
+                // Check if currently syncing
+                val isSyncing = uiState is SyncUiState.Syncing || uiState is SyncUiState.Refreshing
+
+                // Rotation animation for refresh icon
+                val infiniteTransition = rememberInfiniteTransition(label = "refresh")
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 1000, easing = LinearEasing)
+                    ),
+                    label = "rotation"
+                )
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = "Circadia",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = { syncViewModel.sync() },
+                                    enabled = !isSyncing
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Sync",
+                                        modifier = if (isSyncing) {
+                                            Modifier.rotate(rotation)
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            )
+                        )
+                    }
+                ) { innerPadding ->
                     SyncScreen(
                         viewModel = syncViewModel,
                         onRequestPermission = { intent ->
