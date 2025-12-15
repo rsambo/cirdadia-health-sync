@@ -3,6 +3,7 @@ package com.circadia.healthsync.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
@@ -24,6 +25,8 @@ class HealthConnectManager(private val context: Context) {
     private var healthConnectClient: HealthConnectClient? = null
 
     companion object {
+        private const val TAG = "HealthConnectManager"
+
         // Required permissions for this app
         val PERMISSIONS = setOf(
             HealthPermission.getReadPermission(StepsRecord::class)
@@ -121,6 +124,43 @@ class HealthConnectManager(private val context: Context) {
 
         val response = client.readRecords(request)
         return aggregateDailySteps(response.records)
+    }
+
+    /**
+     * Read step count records since a given timestamp (incremental sync).
+     * If no timestamp is provided, falls back to last 7 days.
+     * @param since The timestamp to fetch steps from, or null for default 7 days
+     * @return A list of daily step counts aggregated by date
+     */
+    suspend fun readStepsSince(since: Instant? = null): List<DailyStepCount> {
+        val client = healthConnectClient ?: throw IllegalStateException("Health Connect not available")
+
+        val endTime = Instant.now()
+        val startTime = since ?: endTime.minus(7, ChronoUnit.DAYS)
+
+        Log.d(TAG, "readStepsSince: Querying from $startTime to $endTime")
+        Log.d(TAG, "readStepsSince: since parameter was ${if (since != null) "provided" else "null (using 7 day default)"}")
+
+        val request = ReadRecordsRequest(
+            recordType = StepsRecord::class,
+            timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+        )
+
+        val response = client.readRecords(request)
+        Log.d(TAG, "readStepsSince: Got ${response.records.size} raw step records from Health Connect")
+
+        // Log each raw record for debugging
+        response.records.forEach { record ->
+            Log.d(TAG, "  Record: ${record.count} steps from ${record.startTime} to ${record.endTime}")
+        }
+
+        val aggregated = aggregateDailySteps(response.records)
+        Log.d(TAG, "readStepsSince: Aggregated into ${aggregated.size} daily totals")
+        aggregated.forEach { daily ->
+            Log.d(TAG, "  ${daily.date}: ${daily.count} steps")
+        }
+
+        return aggregated
     }
 
     /**

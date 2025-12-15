@@ -8,14 +8,19 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.circadia.healthsync.data.model.CachedSyncData
 
 /**
  * Main sync screen composable.
@@ -29,6 +34,20 @@ fun SyncScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Trigger auto-sync when app comes to foreground
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.autoSync()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -157,6 +176,28 @@ private fun SyncButton(
                 )
             }
         }
+        is SyncUiState.Refreshing -> {
+            // Show syncing button but disabled while refreshing
+            Button(
+                onClick = { },
+                enabled = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(80.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 3.dp
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Syncing...",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
         else -> {
             // Ready, Success, or Error state - show Sync button
             Button(
@@ -209,11 +250,16 @@ private fun StatusCard(uiState: SyncUiState) {
 
             when (uiState) {
                 is SyncUiState.Ready -> {
-                    Text(
-                        text = "Ready to sync",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    val cachedData = uiState.cachedData
+                    if (cachedData != null) {
+                        CachedDataDisplay(cachedData = cachedData)
+                    } else {
+                        Text(
+                            text = "Ready to sync",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
                 is SyncUiState.Syncing -> {
                     Row(
@@ -231,6 +277,10 @@ private fun StatusCard(uiState: SyncUiState) {
                         )
                     }
                 }
+                is SyncUiState.Refreshing -> {
+                    // Show cached data with a loading indicator
+                    CachedDataDisplay(cachedData = uiState.cachedData, isRefreshing = true)
+                }
                 is SyncUiState.Success -> {
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
@@ -246,16 +296,7 @@ private fun StatusCard(uiState: SyncUiState) {
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Sent ${uiState.recordCount} records",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = uiState.timestamp,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    CachedDataDisplay(cachedData = uiState.cachedData)
                 }
                 is SyncUiState.Error -> {
                     Icon(
@@ -278,6 +319,20 @@ private fun StatusCard(uiState: SyncUiState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
+                    // Show cached data if available
+                    val cachedData = uiState.cachedData
+                    if (cachedData != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Last synced data:",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        CachedDataDisplay(cachedData = cachedData)
+                    }
                 }
                 is SyncUiState.NoPermission -> {
                     Icon(
@@ -348,5 +403,68 @@ private fun StatusCard(uiState: SyncUiState) {
             }
         }
     }
+}
+
+/**
+ * Displays cached sync data with optional refreshing indicator.
+ */
+@Composable
+private fun CachedDataDisplay(
+    cachedData: CachedSyncData,
+    isRefreshing: Boolean = false
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Step count
+        Text(
+            text = "${cachedData.totalStepCount.formatWithCommas()} steps",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Record count
+        Text(
+            text = "${cachedData.recordCount} records",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Last synced timestamp with optional refreshing indicator
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isRefreshing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Updating...",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = "Last synced: ${cachedData.formattedTimestamp}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Extension function to format a Long with comma separators.
+ */
+private fun Long.formatWithCommas(): String {
+    return String.format("%,d", this)
 }
 
