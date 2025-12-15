@@ -6,6 +6,8 @@
 - [ ] Auto-update on open
 
     - When the user opens the app, steps update without them doing anything
+    - [ ] on-open-syncing
+    - [ ] ui-polish
 
 - [ ] Incremental updates
 
