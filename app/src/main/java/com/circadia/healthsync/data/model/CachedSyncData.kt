@@ -7,6 +7,8 @@ package com.circadia.healthsync.data.model
 data class CachedSyncData(
     /** Total step count from the last sync */
     val totalStepCount: Long,
+    /** Today's step count */
+    val todayStepCount: Long = 0,
     /** Number of records synced */
     val recordCount: Int,
     /** ISO 8601 timestamp of when the data was synced */

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.circadia.healthsync.data.model.CachedSyncData
+import com.circadia.healthsync.data.model.UploadStatus
 import com.circadia.healthsync.ui.utils.TimeFormatters
 
 /**
@@ -165,7 +166,10 @@ private fun StatusCard(uiState: SyncUiState) {
                 is SyncUiState.Ready -> {
                     val cachedData = uiState.cachedData
                     if (cachedData != null) {
-                        CachedDataDisplay(cachedData = cachedData)
+                        CachedDataDisplay(
+                            cachedData = cachedData,
+                            uploadStatus = UploadStatus.OK
+                        )
                     } else {
                         Text(
                             text = "Ready to sync",
@@ -192,24 +196,17 @@ private fun StatusCard(uiState: SyncUiState) {
                 }
                 is SyncUiState.Refreshing -> {
                     // Show cached data with a loading indicator
-                    CachedDataDisplay(cachedData = uiState.cachedData, isRefreshing = true)
+                    CachedDataDisplay(
+                        cachedData = uiState.cachedData,
+                        isRefreshing = true,
+                        uploadStatus = UploadStatus.PENDING
+                    )
                 }
                 is SyncUiState.Success -> {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
+                    CachedDataDisplay(
+                        cachedData = uiState.cachedData,
+                        uploadStatus = UploadStatus.OK
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Sync successful!",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    CachedDataDisplay(cachedData = uiState.cachedData)
                 }
                 is SyncUiState.Error -> {
                     Icon(
@@ -238,13 +235,10 @@ private fun StatusCard(uiState: SyncUiState) {
                         Spacer(modifier = Modifier.height(12.dp))
                         HorizontalDivider()
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Last synced data:",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        CachedDataDisplay(
+                            cachedData = cachedData,
+                            uploadStatus = UploadStatus.ERROR
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        CachedDataDisplay(cachedData = cachedData)
                     }
                 }
                 is SyncUiState.NoPermission -> {
@@ -324,17 +318,32 @@ private fun StatusCard(uiState: SyncUiState) {
 @Composable
 private fun CachedDataDisplay(
     cachedData: CachedSyncData,
-    isRefreshing: Boolean = false
+    isRefreshing: Boolean = false,
+    uploadStatus: UploadStatus = UploadStatus.OK
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Step count
+        // Today's step count (prominent)
         Text(
-            text = "${cachedData.totalStepCount.formatWithCommas()} steps",
-            fontSize = 24.sp,
+            text = cachedData.todayStepCount.formatWithCommas(),
+            fontSize = 48.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "steps today",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 7-day total (secondary)
+        Text(
+            text = "${cachedData.totalStepCount.formatWithCommas()} steps (7 days)",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         // Step diff (if available and non-zero)
@@ -347,29 +356,18 @@ private fun CachedDataDisplay(
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
             Text(
-                text = "$diffText steps",
-                fontSize = 14.sp,
+                text = "$diffText since last sync",
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = diffColor
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Record count
-        Text(
-            text = "${cachedData.recordCount} records",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Last synced timestamp with optional refreshing indicator
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isRefreshing) {
+        // Last synced timestamp
+        if (isRefreshing) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
                     strokeWidth = 2.dp
@@ -380,15 +378,32 @@ private fun CachedDataDisplay(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                // Use relative timestamp
-                val relativeTime = TimeFormatters.formatRelativeTimestamp(cachedData.syncTimestamp)
-                Text(
-                    text = "Last synced: $relativeTime",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
+        } else {
+            val relativeTime = TimeFormatters.formatRelativeTimestamp(cachedData.syncTimestamp)
+            Text(
+                text = "Last updated: $relativeTime",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Upload status indicator
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Colored dot
+            Surface(
+                modifier = Modifier.size(8.dp),
+                shape = MaterialTheme.shapes.small,
+                color = uploadStatus.color
+            ) {}
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Upload status: ${uploadStatus.displayText}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

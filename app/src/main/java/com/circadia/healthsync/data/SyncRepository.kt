@@ -7,6 +7,7 @@ import com.circadia.healthsync.data.model.CachedSyncData
 import com.circadia.healthsync.data.model.StepRecord
 import com.circadia.healthsync.data.model.SyncRequest
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -59,13 +60,10 @@ class SyncRepository(
         Log.d(TAG, "performSync: Cached data exists: ${cachedData != null}")
 
         return try {
-            // Step 1: Get last sync timestamp for incremental fetch
-            val lastSyncTimestamp = syncPreferences.getLastSyncTimestamp()
-            Log.d(TAG, "performSync: Last sync timestamp: $lastSyncTimestamp")
-
-            // Step 2: Read steps from Health Connect (incremental or full 7 days)
-            Log.d(TAG, "performSync: Reading steps from Health Connect...")
-            val dailySteps = healthConnectManager.readStepsSince(lastSyncTimestamp)
+            // Always fetch full 7 days to catch any backfilled/late-synced data
+            // The backend handles deduplication based on date
+            Log.d(TAG, "performSync: Reading steps from Health Connect (full 7 days)...")
+            val dailySteps = healthConnectManager.readStepsSince(null)  // null = full 7 days
             Log.d(TAG, "performSync: Got ${dailySteps.size} daily step records")
 
             if (dailySteps.isEmpty()) {
@@ -99,7 +97,13 @@ class SyncRepository(
                 val body = response.body()!!
                 val now = Instant.now()
                 val totalStepCount = dailySteps.sumOf { it.count }
-                Log.d(TAG, "performSync: Success! Total steps: $totalStepCount, records: ${body.recordCount}")
+
+                // Calculate today's steps
+                val today = LocalDate.now()
+                val todayStepCount = dailySteps
+                    .filter { it.date == today }
+                    .sumOf { it.count }
+                Log.d(TAG, "performSync: Success! Total steps: $totalStepCount, Today's steps: $todayStepCount, records: ${body.recordCount}")
 
                 // Calculate step diff from previous sync
                 val previousStepCount = cachedData?.totalStepCount
@@ -109,9 +113,10 @@ class SyncRepository(
                 } else null
                 Log.d(TAG, "performSync: Previous count: $previousStepCount, Diff: $stepDiff")
 
-                // Create cached data with diff
+                // Create cached data with diff and today's count
                 val newCachedData = CachedSyncData(
                     totalStepCount = totalStepCount,
+                    todayStepCount = todayStepCount,
                     recordCount = body.recordCount,
                     syncTimestamp = now.toString(),
                     formattedTimestamp = formatTimestamp(now),

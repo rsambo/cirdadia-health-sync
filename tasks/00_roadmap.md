@@ -3,26 +3,19 @@
 
 ## Sprint 1 — Make sync feel automatic
 
-- [ ] Auto-update on open
+- [x] Auto-update on open
 
     - When the user opens the app, steps update without them doing anything
-    - [ ] on-open-syncing
-    - [ ] ui-polish
+    - [x] on-open-syncing
+    - [x] ui-polish
 
-- [ ] Incremental updates
+- [x] Incremental updates
 
     - Only fetch what's new since the last time (so it's fast)
 
-- [ ] Daily totals
+- [x] Running daily total & status
 
-    - Show and send one clear "steps today / steps per day" number (not a bunch of raw entries)
-
-- [ ] Web dashboard stays current
-
-    - The newest daily totals appear on the web side
-
-- [ ] Basic status
-
+    - In mobile app show running total of steps for the current day.
     - Show "Last updated at …" and "Upload status: OK / Pending / Error"
 
 
