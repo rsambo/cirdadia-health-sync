@@ -16,6 +16,7 @@ class SyncPreferences(context: Context) {
         private const val PREFS_NAME = "sync_preferences"
         private const val KEY_LAST_SYNC_TIMESTAMP = "last_sync_timestamp"
         private const val KEY_CACHED_SYNC_DATA = "cached_sync_data"
+        private const val KEY_CHANGES_TOKEN = "changes_token"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -73,6 +74,34 @@ class SyncPreferences(context: Context) {
     }
 
     /**
+     * Save the Health Connect changes token.
+     * @param token The changes token from Health Connect
+     */
+    fun saveChangesToken(token: String) {
+        prefs.edit()
+            .putString(KEY_CHANGES_TOKEN, token)
+            .apply()
+    }
+
+    /**
+     * Get the stored Health Connect changes token.
+     * @return The changes token, or null if not stored
+     */
+    fun getChangesToken(): String? {
+        return prefs.getString(KEY_CHANGES_TOKEN, null)
+    }
+
+    /**
+     * Clear the changes token.
+     * Used when token expires or on fallback to full sync.
+     */
+    fun clearChangesToken() {
+        prefs.edit()
+            .remove(KEY_CHANGES_TOKEN)
+            .apply()
+    }
+
+    /**
      * Clear all cached data.
      * Useful for testing or logout scenarios.
      */
@@ -80,6 +109,7 @@ class SyncPreferences(context: Context) {
         prefs.edit()
             .remove(KEY_LAST_SYNC_TIMESTAMP)
             .remove(KEY_CACHED_SYNC_DATA)
+            .remove(KEY_CHANGES_TOKEN)
             .apply()
     }
 }

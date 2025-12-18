@@ -1,16 +1,18 @@
 package com.circadia.healthsync.ui.sync
 
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,8 +24,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.circadia.healthsync.data.model.CachedSyncData
-import com.circadia.healthsync.data.model.UploadStatus
+import com.circadia.healthsync.data.model.SyncStatus
 import com.circadia.healthsync.ui.utils.TimeFormatters
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Main sync screen composable.
@@ -38,6 +41,17 @@ fun SyncScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Observe sync events and show snackbar
+    LaunchedEffect(Unit) {
+        viewModel.syncEvents.collectLatest { event ->
+            snackbarHostState.showSnackbar(
+                message = event.getMessage(),
+                duration = SnackbarDuration.Short
+            )
+        }
+    }
 
     // Trigger auto-sync when app comes to foreground
     DisposableEffect(lifecycleOwner) {
@@ -52,24 +66,35 @@ fun SyncScreen(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Action buttons for permission/install (only when needed)
-        ActionButton(
-            uiState = uiState,
-            onRequestPermission = { onRequestPermission(viewModel.getPermissionRequestIntent()) },
-            onInstallHealthConnect = { onInstallHealthConnect(viewModel.getInstallHealthConnectIntent()) }
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Action buttons for permission/install (only when needed)
+            ActionButton(
+                uiState = uiState,
+                onRequestPermission = { onRequestPermission(viewModel.getPermissionRequestIntent()) },
+                onInstallHealthConnect = { onInstallHealthConnect(viewModel.getInstallHealthConnectIntent()) }
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Status Area
+            StatusCard(
+                uiState = uiState,
+                onRetry = { viewModel.sync() }
+            )
+        }
+
+        // Snackbar host for sync event notifications
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
         )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Status Area
-        StatusCard(uiState = uiState)
     }
 }
 
@@ -140,7 +165,10 @@ private fun ActionButton(
  * Status card displaying current sync state information.
  */
 @Composable
-private fun StatusCard(uiState: SyncUiState) {
+private fun StatusCard(
+    uiState: SyncUiState,
+    onRetry: () -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -150,112 +178,65 @@ private fun StatusCard(uiState: SyncUiState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "Status",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             when (uiState) {
                 is SyncUiState.Ready -> {
                     val cachedData = uiState.cachedData
                     if (cachedData != null) {
-                        CachedDataDisplay(
-                            cachedData = cachedData,
-                            uploadStatus = UploadStatus.OK
+                        SimplifiedStatusDisplay(
+                            status = SyncStatus.UP_TO_DATE,
+                            lastSyncTimestamp = cachedData.syncTimestamp
                         )
                     } else {
-                        Text(
-                            text = "Ready to sync",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                        SimplifiedStatusDisplay(
+                            status = SyncStatus.UP_TO_DATE,
+                            lastSyncTimestamp = null
                         )
                     }
                 }
                 is SyncUiState.Syncing -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Syncing health data...",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    SimplifiedStatusDisplay(
+                        status = SyncStatus.SYNCING,
+                        lastSyncTimestamp = null
+                    )
                 }
                 is SyncUiState.Refreshing -> {
-                    // Show cached data with a loading indicator
-                    CachedDataDisplay(
-                        cachedData = uiState.cachedData,
-                        isRefreshing = true,
-                        uploadStatus = UploadStatus.PENDING
+                    SimplifiedStatusDisplay(
+                        status = SyncStatus.SYNCING,
+                        lastSyncTimestamp = uiState.cachedData.syncTimestamp
                     )
                 }
                 is SyncUiState.Success -> {
-                    CachedDataDisplay(
-                        cachedData = uiState.cachedData,
-                        uploadStatus = UploadStatus.OK
+                    SimplifiedStatusDisplay(
+                        status = SyncStatus.UP_TO_DATE,
+                        lastSyncTimestamp = uiState.cachedData.syncTimestamp
                     )
                 }
                 is SyncUiState.Error -> {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(32.dp)
+                    SimplifiedStatusDisplay(
+                        status = SyncStatus.NEEDS_ATTENTION,
+                        lastSyncTimestamp = uiState.cachedData?.syncTimestamp,
+                        errorMessage = uiState.message,
+                        onRetry = onRetry
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Sync failed",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = uiState.message,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                    // Show cached data if available
-                    val cachedData = uiState.cachedData
-                    if (cachedData != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(12.dp))
-                        CachedDataDisplay(
-                            cachedData = cachedData,
-                            uploadStatus = UploadStatus.ERROR
-                        )
-                    }
                 }
                 is SyncUiState.NoPermission -> {
                     Icon(
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Permission Required",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.secondary
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Grant Health Connect permission to sync your step data",
                         fontSize = 14.sp,
@@ -268,16 +249,16 @@ private fun StatusCard(uiState: SyncUiState) {
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Health Connect Required",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.tertiary
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Please install Health Connect from the Play Store",
                         fontSize = 14.sp,
@@ -290,16 +271,16 @@ private fun StatusCard(uiState: SyncUiState) {
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Not Supported",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.error
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Health Connect is not supported on this device",
                         fontSize = 14.sp,
@@ -313,105 +294,94 @@ private fun StatusCard(uiState: SyncUiState) {
 }
 
 /**
- * Displays cached sync data with optional refreshing indicator.
+ * Simplified status display showing only sync status and last sync time.
  */
 @Composable
-private fun CachedDataDisplay(
-    cachedData: CachedSyncData,
-    isRefreshing: Boolean = false,
-    uploadStatus: UploadStatus = UploadStatus.OK
+private fun SimplifiedStatusDisplay(
+    status: SyncStatus,
+    lastSyncTimestamp: String?,
+    errorMessage: String? = null,
+    onRetry: () -> Unit = {}
 ) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = if (status == SyncStatus.NEEDS_ATTENTION) {
+            Modifier.clickable { onRetry() }
+        } else {
+            Modifier
+        }
     ) {
-        // Today's step count (prominent)
+        // Status icon
+        when (status) {
+            SyncStatus.UP_TO_DATE -> {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Up to date",
+                    tint = status.color,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+            SyncStatus.SYNCING -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(48.dp),
+                    strokeWidth = 4.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            SyncStatus.NEEDS_ATTENTION -> {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Needs attention",
+                    tint = status.color,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Status text
         Text(
-            text = cachedData.todayStepCount.formatWithCommas(),
-            fontSize = 48.sp,
-            fontWeight = FontWeight.Bold,
+            text = status.displayText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface
         )
-        Text(
-            text = "steps today",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 7-day total (secondary)
-        Text(
-            text = "${cachedData.totalStepCount.formatWithCommas()} steps (7 days)",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // Step diff (if available and non-zero)
-        cachedData.stepDiff?.let { diff ->
+        // Error hint for needs attention state
+        if (status == SyncStatus.NEEDS_ATTENTION) {
             Spacer(modifier = Modifier.height(4.dp))
-            val diffText = if (diff > 0) "+${diff.formatWithCommas()}" else diff.formatWithCommas()
-            val diffColor = when {
-                diff > 0 -> Color(0xFF4CAF50)  // Green
-                diff < 0 -> Color(0xFFF44336)  // Red
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
             Text(
-                text = "$diffText since last sync",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = diffColor
+                text = "Tap to retry",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         // Last synced timestamp
-        if (isRefreshing) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Updating...",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            val relativeTime = TimeFormatters.formatRelativeTimestamp(cachedData.syncTimestamp)
+        if (lastSyncTimestamp != null) {
+            val relativeTime = TimeFormatters.formatRelativeTimestamp(lastSyncTimestamp)
             Text(
-                text = "Last updated: $relativeTime",
-                fontSize = 12.sp,
+                text = "Last synced: $relativeTime",
+                fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Upload status indicator
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Colored dot
-            Surface(
-                modifier = Modifier.size(8.dp),
-                shape = MaterialTheme.shapes.small,
-                color = uploadStatus.color
-            ) {}
-            Spacer(modifier = Modifier.width(6.dp))
+        } else if (status == SyncStatus.SYNCING) {
             Text(
-                text = "Upload status: ${uploadStatus.displayText}",
-                fontSize = 12.sp,
+                text = "Syncing with Health Connect...",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = "Not yet synced",
+                fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
-/**
- * Extension function to format a Long with comma separators.
- */
-private fun Long.formatWithCommas(): String {
-    return String.format(java.util.Locale.US, "%,d", this)
-}
 

@@ -5,13 +5,26 @@ import com.circadia.healthsync.data.api.ApiClient
 import com.circadia.healthsync.data.local.SyncPreferences
 import com.circadia.healthsync.data.model.CachedSyncData
 import com.circadia.healthsync.data.model.StepRecord
+import com.circadia.healthsync.data.model.StepRecordData
 import com.circadia.healthsync.data.model.SyncRequest
+import com.google.gson.Gson
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private const val TAG = "SyncRepository"
+private val gson = Gson()
+
+/**
+ * Describes what type of changes occurred during sync.
+ */
+data class SyncChanges(
+    val stepsUpdated: Int = 0,
+    val stepsDeleted: Int = 0
+) {
+    val hasChanges: Boolean get() = stepsUpdated > 0 || stepsDeleted > 0
+    val totalChanges: Int get() = stepsUpdated + stepsDeleted
+}
 
 /**
  * Result class for sync operations.
@@ -19,7 +32,8 @@ private const val TAG = "SyncRepository"
 sealed class SyncResult {
     /** Sync completed successfully */
     data class Success(
-        val cachedData: CachedSyncData
+        val cachedData: CachedSyncData,
+        val changes: SyncChanges = SyncChanges()
     ) : SyncResult()
 
     /** Sync failed with an error */
@@ -50,9 +64,18 @@ class SyncRepository(
     }
 
     /**
-     * Perform a sync operation.
-     * Fetches steps incrementally since last sync, sends to API, and caches result.
-     * @return SyncResult indicating success or failure
+     * Clear the changes token to force a full sync on next sync operation.
+     * Useful when backend data is reset or out of sync.
+     */
+    fun clearChangesToken() {
+        Log.d(TAG, "clearChangesToken: Clearing token to force full sync")
+        syncPreferences.clearChangesToken()
+    }
+
+    /**
+     * Perform a sync operation using Health Connect Changes API.
+     * Uses incremental sync if a changes token exists, otherwise performs full sync.
+     * @return SyncResult indicating success or failure, with change details
      */
     suspend fun performSync(): SyncResult {
         Log.d(TAG, "performSync: Starting sync operation")
@@ -60,86 +83,24 @@ class SyncRepository(
         Log.d(TAG, "performSync: Cached data exists: ${cachedData != null}")
 
         return try {
-            // Always fetch full 7 days to catch any backfilled/late-synced data
-            // The backend handles deduplication based on date
-            Log.d(TAG, "performSync: Reading steps from Health Connect (full 7 days)...")
-            val dailySteps = healthConnectManager.readStepsSince(null)  // null = full 7 days
-            Log.d(TAG, "performSync: Got ${dailySteps.size} daily step records")
+            val existingToken = syncPreferences.getChangesToken()
 
-            if (dailySteps.isEmpty()) {
-                Log.d(TAG, "performSync: No new step data since last sync")
-                // If we have cached data and just no NEW steps, that's not an error
-                // Return success with existing cached data
-                if (cachedData != null) {
-                    Log.d(TAG, "performSync: Returning cached data (no new steps to sync)")
-                    return SyncResult.Success(cachedData = cachedData)
-                } else {
-                    // First sync with no data - this is actually an error
-                    Log.w(TAG, "performSync: First sync but no step data found in Health Connect")
-                    return SyncResult.Error(
-                        message = "No step data found in Health Connect",
-                        cachedData = null
-                    )
+            if (existingToken != null) {
+                // Try incremental sync using Changes API
+                Log.d(TAG, "performSync: Found existing token, attempting incremental sync")
+                try {
+                    performIncrementalSync(existingToken, cachedData)
+                } catch (e: ChangesTokenExpiredException) {
+                    // Token expired, fall back to full sync
+                    Log.w(TAG, "performSync: Token expired, falling back to full sync")
+                    syncPreferences.clearChangesToken()
+                    performFullSync(cachedData)
                 }
-            }
-
-            // Step 3: Transform to API format
-            val stepRecords = transformToApiFormat(dailySteps)
-            val request = SyncRequest(records = stepRecords)
-            Log.d(TAG, "performSync: Sending ${stepRecords.size} records to API")
-
-            // Step 4: Send to backend
-            val response = ApiClient.getApi().syncHealthData(request)
-            Log.d(TAG, "performSync: API response code: ${response.code()}")
-
-            // Step 5: Handle response
-            if (response.isSuccessful && response.body()?.success == true) {
-                val body = response.body()!!
-                val now = Instant.now()
-                val totalStepCount = dailySteps.sumOf { it.count }
-
-                // Calculate today's steps
-                val today = LocalDate.now()
-                val todayStepCount = dailySteps
-                    .filter { it.date == today }
-                    .sumOf { it.count }
-                Log.d(TAG, "performSync: Success! Total steps: $totalStepCount, Today's steps: $todayStepCount, records: ${body.recordCount}")
-
-                // Calculate step diff from previous sync
-                val previousStepCount = cachedData?.totalStepCount
-                val stepDiff = if (previousStepCount != null) {
-                    val diff = totalStepCount - previousStepCount
-                    if (diff != 0L) diff else null  // Only store non-zero diff
-                } else null
-                Log.d(TAG, "performSync: Previous count: $previousStepCount, Diff: $stepDiff")
-
-                // Create cached data with diff and today's count
-                val newCachedData = CachedSyncData(
-                    totalStepCount = totalStepCount,
-                    todayStepCount = todayStepCount,
-                    recordCount = body.recordCount,
-                    syncTimestamp = now.toString(),
-                    formattedTimestamp = formatTimestamp(now),
-                    previousStepCount = previousStepCount,
-                    stepDiff = stepDiff
-                )
-
-                // Step 6: Store sync timestamp and cached data
-                syncPreferences.saveLastSyncTimestamp(now)
-                syncPreferences.saveCachedSyncData(newCachedData)
-                Log.d(TAG, "performSync: Cached data saved")
-
-                SyncResult.Success(cachedData = newCachedData)
             } else {
-                val errorMessage = response.body()?.message
-                    ?: "Server error: ${response.code()}"
-                Log.e(TAG, "performSync: API error - $errorMessage")
-                SyncResult.Error(
-                    message = errorMessage,
-                    cachedData = cachedData
-                )
+                // No token, perform full sync
+                Log.d(TAG, "performSync: No existing token, performing full sync")
+                performFullSync(cachedData)
             }
-
         } catch (e: java.net.UnknownHostException) {
             Log.e(TAG, "performSync: Network error - UnknownHostException", e)
             SyncResult.Error(
@@ -153,6 +114,7 @@ class SyncRepository(
                 cachedData = cachedData
             )
         } catch (e: Exception) {
+            Log.e(TAG, "performSync: Unexpected error", e)
             SyncResult.Error(
                 message = "Error: ${e.message ?: "Unknown error"}",
                 cachedData = cachedData
@@ -161,14 +123,148 @@ class SyncRepository(
     }
 
     /**
+     * Perform an incremental sync using the Changes API.
+     */
+    private suspend fun performIncrementalSync(token: String, cachedData: CachedSyncData?): SyncResult {
+        Log.d(TAG, "performIncrementalSync: Getting changes since token")
+
+        val changeResult = healthConnectManager.getChanges(token)
+
+        if (!changeResult.hasChanges) {
+            Log.d(TAG, "performIncrementalSync: No changes detected")
+            // Save new token even if no changes
+            syncPreferences.saveChangesToken(changeResult.nextToken)
+
+            return if (cachedData != null) {
+                SyncResult.Success(cachedData = cachedData, changes = SyncChanges())
+            } else {
+                // First sync with no data - shouldn't happen in incremental
+                Log.w(TAG, "performIncrementalSync: No cached data and no changes")
+                performFullSync(cachedData)
+            }
+        }
+
+        Log.d(TAG, "performIncrementalSync: ${changeResult.upsertedRecords.size} upserts, ${changeResult.deletedRecordIds.size} deletions")
+
+        // Send changes to backend
+        val request = SyncRequest(
+            syncType = "incremental",
+            records = changeResult.upsertedRecords,
+            deletedRecordIds = changeResult.deletedRecordIds
+        )
+
+        // Log the full request payload
+        Log.d(TAG, "performIncrementalSync: Request payload: ${gson.toJson(request)}")
+
+        val response = ApiClient.getApi().syncHealthData(request)
+        Log.d(TAG, "performIncrementalSync: API response code: ${response.code()}")
+        Log.d(TAG, "performIncrementalSync: API response body: ${gson.toJson(response.body())}")
+
+        if (response.isSuccessful && response.body()?.success == true) {
+            val now = Instant.now()
+
+            // Save new token
+            syncPreferences.saveChangesToken(changeResult.nextToken)
+
+            val newCachedData = CachedSyncData(
+                syncTimestamp = now.toString(),
+                formattedTimestamp = formatTimestamp(now)
+            )
+
+            syncPreferences.saveLastSyncTimestamp(now)
+            syncPreferences.saveCachedSyncData(newCachedData)
+
+            val changes = SyncChanges(
+                stepsUpdated = changeResult.upsertedRecords.size,
+                stepsDeleted = changeResult.deletedRecordIds.size
+            )
+
+            Log.d(TAG, "performIncrementalSync: Success! Changes: $changes")
+            return SyncResult.Success(cachedData = newCachedData, changes = changes)
+        } else {
+            val errorMessage = response.body()?.message ?: "Server error: ${response.code()}"
+            Log.e(TAG, "performIncrementalSync: API error - $errorMessage")
+            return SyncResult.Error(message = errorMessage, cachedData = cachedData)
+        }
+    }
+
+    /**
+     * Perform a full sync (all records from last 7 days).
+     */
+    private suspend fun performFullSync(cachedData: CachedSyncData?): SyncResult {
+        Log.d(TAG, "performFullSync: Reading all steps with IDs")
+
+        val stepRecords = healthConnectManager.readStepsWithIds()
+
+        if (stepRecords.isEmpty()) {
+            Log.d(TAG, "performFullSync: No step data found")
+            if (cachedData != null) {
+                // Get a new token for future syncs even if no data
+                val newToken = healthConnectManager.getChangesToken()
+                syncPreferences.saveChangesToken(newToken)
+                return SyncResult.Success(cachedData = cachedData, changes = SyncChanges())
+            } else {
+                return SyncResult.Error(
+                    message = "No step data found in Health Connect",
+                    cachedData = null
+                )
+            }
+        }
+
+        Log.d(TAG, "performFullSync: Sending ${stepRecords.size} records to API")
+
+        val request = SyncRequest(
+            syncType = "full",
+            records = stepRecords,
+            deletedRecordIds = emptyList()
+        )
+
+        // Log the full request payload
+        Log.d(TAG, "performFullSync: Request payload: ${gson.toJson(request)}")
+
+        val response = ApiClient.getApi().syncHealthData(request)
+        Log.d(TAG, "performFullSync: API response code: ${response.code()}")
+        Log.d(TAG, "performFullSync: API response body: ${gson.toJson(response.body())}")
+
+        if (response.isSuccessful && response.body()?.success == true) {
+            val now = Instant.now()
+
+            // Get a new changes token for future incremental syncs
+            val newToken = healthConnectManager.getChangesToken()
+            syncPreferences.saveChangesToken(newToken)
+
+            val newCachedData = CachedSyncData(
+                syncTimestamp = now.toString(),
+                formattedTimestamp = formatTimestamp(now)
+            )
+
+            syncPreferences.saveLastSyncTimestamp(now)
+            syncPreferences.saveCachedSyncData(newCachedData)
+
+            Log.d(TAG, "performFullSync: Success!")
+            return SyncResult.Success(cachedData = newCachedData, changes = SyncChanges())
+        } else {
+            val errorMessage = response.body()?.message ?: "Server error: ${response.code()}"
+            Log.e(TAG, "performFullSync: API error - $errorMessage")
+            return SyncResult.Error(message = errorMessage, cachedData = cachedData)
+        }
+    }
+
+    /**
      * Transform daily step counts to API record format.
+     * @deprecated Use readStepsWithIds() instead which includes record IDs
      */
     private fun transformToApiFormat(dailySteps: List<DailyStepCount>): List<StepRecord> {
         return dailySteps.map { daily ->
             StepRecord(
+                id = "", // No ID available from aggregated data
                 type = "steps",
                 date = daily.date.format(dateFormatter),
-                count = daily.count
+                count = daily.count,
+                data = StepRecordData(
+                    startTime = "", // No time available from aggregated data
+                    endTime = ""
+                )
             )
         }
     }

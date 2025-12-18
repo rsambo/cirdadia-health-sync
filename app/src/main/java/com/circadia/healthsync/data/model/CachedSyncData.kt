@@ -2,22 +2,12 @@ package com.circadia.healthsync.data.model
 
 /**
  * Data class for cached sync data.
- * Holds the last synced step information for display while fetching new data.
+ * Holds the timestamp of the last successful sync.
  */
 data class CachedSyncData(
-    /** Total step count from the last sync */
-    val totalStepCount: Long,
-    /** Today's step count */
-    val todayStepCount: Long = 0,
-    /** Number of records synced */
-    val recordCount: Int,
     /** ISO 8601 timestamp of when the data was synced */
     val syncTimestamp: String,
     /** Formatted timestamp for display (e.g., "Dec 15, 2025 at 2:30 PM") */
-    val formattedTimestamp: String,
-    /** Previous step count before this sync (for calculating diff) */
-    val previousStepCount: Long? = null,
-    /** Step difference from previous sync (positive = gained, negative = lost) */
-    val stepDiff: Long? = null
+    val formattedTimestamp: String
 )
 

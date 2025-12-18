@@ -12,8 +12,12 @@ import com.circadia.healthsync.data.SyncResult
 import com.circadia.healthsync.data.local.SyncPreferences
 import com.circadia.healthsync.data.model.CachedSyncData
 import com.circadia.healthsync.data.model.StepRecord
+import com.circadia.healthsync.data.model.StepRecordData
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
@@ -66,6 +70,10 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow<SyncUiState>(SyncUiState.Ready())
     val uiState: StateFlow<SyncUiState> = _uiState.asStateFlow()
+
+    // One-time events for showing notifications
+    private val _syncEvents = MutableSharedFlow<SyncEvent>()
+    val syncEvents: SharedFlow<SyncEvent> = _syncEvents.asSharedFlow()
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val displayFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy 'at' h:mm a")
@@ -205,6 +213,9 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
                 is SyncResult.Success -> {
                     Log.d(TAG, "autoSync: Sync successful")
                     _uiState.value = SyncUiState.Success(cachedData = result.cachedData)
+
+                    // Emit event if changes were detected
+                    emitSyncEvent(result.changes)
                 }
                 is SyncResult.Error -> {
                     Log.e(TAG, "autoSync: Sync failed - ${result.message}")
@@ -244,6 +255,9 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = syncRepository.performSync()) {
                 is SyncResult.Success -> {
                     _uiState.value = SyncUiState.Success(cachedData = result.cachedData)
+
+                    // Emit event if changes were detected
+                    emitSyncEvent(result.changes)
                 }
                 is SyncResult.Error -> {
                     _uiState.value = SyncUiState.Error(
@@ -258,14 +272,44 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Emit a sync event based on the changes detected.
+     */
+    private fun emitSyncEvent(changes: com.circadia.healthsync.data.SyncChanges) {
+        if (!changes.hasChanges) return
+
+        viewModelScope.launch {
+            val event = when {
+                changes.stepsUpdated > 0 && changes.stepsDeleted > 0 -> {
+                    SyncEvent.MultipleChanges(changes.totalChanges)
+                }
+                changes.stepsUpdated > 0 -> {
+                    SyncEvent.StepsUpdated(changes.stepsUpdated)
+                }
+                changes.stepsDeleted > 0 -> {
+                    SyncEvent.StepsDeleted(changes.stepsDeleted)
+                }
+                else -> return@launch
+            }
+            Log.d(TAG, "emitSyncEvent: Emitting ${event.getMessage()}")
+            _syncEvents.emit(event)
+        }
+    }
+
+    /**
      * Transform daily step counts to API record format.
+     * @deprecated Use SyncRepository which now handles record IDs
      */
     private fun transformToApiFormat(dailySteps: List<DailyStepCount>): List<StepRecord> {
         return dailySteps.map { daily ->
             StepRecord(
+                id = "", // Deprecated method, no ID available
                 type = "steps",
                 date = daily.date.format(dateFormatter),
-                count = daily.count
+                count = daily.count,
+                data = StepRecordData(
+                    startTime = "", // Deprecated method, no time available
+                    endTime = ""
+                )
             )
         }
     }
@@ -291,6 +335,18 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             val cachedData = syncRepository.getCachedData()
             _uiState.value = SyncUiState.Ready(cachedData)
         }
+    }
+
+    /**
+     * Force a full sync by clearing the changes token and then syncing.
+     * Use this when the backend data is out of sync with the app.
+     */
+    fun forceFullSync() {
+        if (isSyncing) return
+
+        Log.d(TAG, "forceFullSync: Clearing token and forcing full sync")
+        syncRepository.clearChangesToken()
+        sync()
     }
 }
 
