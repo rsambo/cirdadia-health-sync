@@ -35,7 +35,7 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun SyncScreen(
     viewModel: SyncViewModel,
-    onRequestPermission: (Intent) -> Unit,
+    onRequestPermission: () -> Unit,
     onInstallHealthConnect: (Intent) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -77,7 +77,7 @@ fun SyncScreen(
             // Action buttons for permission/install (only when needed)
             ActionButton(
                 uiState = uiState,
-                onRequestPermission = { onRequestPermission(viewModel.getPermissionRequestIntent()) },
+                onRequestPermission = onRequestPermission,
                 onInstallHealthConnect = { onInstallHealthConnect(viewModel.getInstallHealthConnectIntent()) }
             )
 
@@ -108,10 +108,15 @@ private fun ActionButton(
     onRequestPermission: () -> Unit,
     onInstallHealthConnect: () -> Unit
 ) {
+    android.util.Log.d("SyncScreen", "ActionButton: uiState = $uiState")
     when (uiState) {
         is SyncUiState.NoPermission -> {
+            android.util.Log.d("SyncScreen", "ActionButton: Showing Grant Permission button")
             Button(
-                onClick = onRequestPermission,
+                onClick = {
+                    android.util.Log.d("SyncScreen", "ActionButton: Grant Permission button clicked!")
+                    onRequestPermission()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),

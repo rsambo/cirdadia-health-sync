@@ -4,14 +4,14 @@ import com.google.gson.annotations.SerializedName
 
 /**
  * Request body for the sync API endpoint.
- * Contains records to upsert and deleted record IDs.
+ * Contains records to upsert (steps, exercise sessions, etc.) and deleted record IDs.
  */
 data class SyncRequest(
     @SerializedName("syncType")
     val syncType: String,  // "full" or "incremental"
 
     @SerializedName("records")
-    val records: List<StepRecord>,
+    val records: List<SyncRecord>,  // Mixed list of StepRecord, ExerciseSessionRecord, etc.
 
     @SerializedName("deletedRecordIds")
     val deletedRecordIds: List<String> = emptyList()

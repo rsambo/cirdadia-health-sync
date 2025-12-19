@@ -13,8 +13,8 @@ interface CircadiaApi {
 
     /**
      * Sync health data to the backend.
-     * POST /api/sync/health-data/test (unauthenticated test endpoint)
+     * POST /api/sync/health-data/:userId - userId is currently hardcoded to "1"
      */
-    @POST("api/sync/health-data/test")
+    @POST("api/sync/health-data/1")
     suspend fun syncHealthData(@Body request: SyncRequest): Response<SyncResponse>
 }

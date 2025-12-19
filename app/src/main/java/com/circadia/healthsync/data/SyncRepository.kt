@@ -4,8 +4,10 @@ import android.util.Log
 import com.circadia.healthsync.data.api.ApiClient
 import com.circadia.healthsync.data.local.SyncPreferences
 import com.circadia.healthsync.data.model.CachedSyncData
+import com.circadia.healthsync.data.model.ExerciseSessionRecord
 import com.circadia.healthsync.data.model.StepRecord
 import com.circadia.healthsync.data.model.StepRecordData
+import com.circadia.healthsync.data.model.SyncRecord
 import com.circadia.healthsync.data.model.SyncRequest
 import com.google.gson.Gson
 import java.time.Instant
@@ -20,10 +22,12 @@ private val gson = Gson()
  */
 data class SyncChanges(
     val stepsUpdated: Int = 0,
-    val stepsDeleted: Int = 0
+    val stepsDeleted: Int = 0,
+    val exerciseSessionsUpdated: Int = 0,
+    val exerciseSessionsDeleted: Int = 0
 ) {
-    val hasChanges: Boolean get() = stepsUpdated > 0 || stepsDeleted > 0
-    val totalChanges: Int get() = stepsUpdated + stepsDeleted
+    val hasChanges: Boolean get() = totalChanges > 0
+    val totalChanges: Int get() = stepsUpdated + stepsDeleted + exerciseSessionsUpdated + exerciseSessionsDeleted
 }
 
 /**
@@ -144,12 +148,15 @@ class SyncRepository(
             }
         }
 
-        Log.d(TAG, "performIncrementalSync: ${changeResult.upsertedRecords.size} upserts, ${changeResult.deletedRecordIds.size} deletions")
+        Log.d(TAG, "performIncrementalSync: ${changeResult.upsertedStepRecords.size} step upserts, ${changeResult.upsertedExerciseSessionRecords.size} exercise upserts, ${changeResult.deletedRecordIds.size} deletions")
+
+        // Combine all records
+        val allRecords: List<SyncRecord> = changeResult.allUpsertedRecords
 
         // Send changes to backend
         val request = SyncRequest(
             syncType = "incremental",
-            records = changeResult.upsertedRecords,
+            records = allRecords,
             deletedRecordIds = changeResult.deletedRecordIds
         )
 
@@ -175,8 +182,9 @@ class SyncRepository(
             syncPreferences.saveCachedSyncData(newCachedData)
 
             val changes = SyncChanges(
-                stepsUpdated = changeResult.upsertedRecords.size,
-                stepsDeleted = changeResult.deletedRecordIds.size
+                stepsUpdated = changeResult.upsertedStepRecords.size,
+                exerciseSessionsUpdated = changeResult.upsertedExerciseSessionRecords.size,
+                stepsDeleted = changeResult.deletedRecordIds.size  // Note: we can't distinguish deleted types
             )
 
             Log.d(TAG, "performIncrementalSync: Success! Changes: $changes")
@@ -192,12 +200,25 @@ class SyncRepository(
      * Perform a full sync (all records from last 7 days).
      */
     private suspend fun performFullSync(cachedData: CachedSyncData?): SyncResult {
-        Log.d(TAG, "performFullSync: Reading all steps with IDs")
+        Log.d(TAG, "performFullSync: Reading all records with IDs")
 
         val stepRecords = healthConnectManager.readStepsWithIds()
 
-        if (stepRecords.isEmpty()) {
-            Log.d(TAG, "performFullSync: No step data found")
+        // Try to read exercise sessions, but don't fail if it errors
+        val exerciseSessionRecords = try {
+            healthConnectManager.readExerciseSessionsWithIds()
+        } catch (e: Exception) {
+            Log.e(TAG, "performFullSync: Failed to read exercise sessions, continuing with steps only", e)
+            emptyList()
+        }
+
+        Log.d(TAG, "performFullSync: Got ${stepRecords.size} steps, ${exerciseSessionRecords.size} exercise sessions")
+
+        // Combine all records
+        val allRecords: List<SyncRecord> = stepRecords + exerciseSessionRecords
+
+        if (allRecords.isEmpty()) {
+            Log.d(TAG, "performFullSync: No data found")
             if (cachedData != null) {
                 // Get a new token for future syncs even if no data
                 val newToken = healthConnectManager.getChangesToken()
@@ -205,17 +226,23 @@ class SyncRepository(
                 return SyncResult.Success(cachedData = cachedData, changes = SyncChanges())
             } else {
                 return SyncResult.Error(
-                    message = "No step data found in Health Connect",
+                    message = "No health data found in Health Connect",
                     cachedData = null
                 )
             }
         }
 
-        Log.d(TAG, "performFullSync: Sending ${stepRecords.size} records to API")
+        Log.d(TAG, "performFullSync: Sending ${allRecords.size} records to API")
+
+        // Log breakdown by type
+        val stepCount = allRecords.count { it is StepRecord }
+        val exerciseCount = allRecords.count { it is ExerciseSessionRecord }
+        Log.d(TAG, "performFullSync: Type breakdown - steps: $stepCount, exercise_sessions: $exerciseCount")
+
 
         val request = SyncRequest(
             syncType = "full",
-            records = stepRecords,
+            records = allRecords,
             deletedRecordIds = emptyList()
         )
 
@@ -244,7 +271,10 @@ class SyncRepository(
             Log.d(TAG, "performFullSync: Success!")
             return SyncResult.Success(cachedData = newCachedData, changes = SyncChanges())
         } else {
-            val errorMessage = response.body()?.message ?: "Server error: ${response.code()}"
+            // Log error body for debugging
+            val errorBody = response.errorBody()?.string()
+            Log.e(TAG, "performFullSync: API error body: $errorBody")
+            val errorMessage = response.body()?.message ?: errorBody ?: "Server error: ${response.code()}"
             Log.e(TAG, "performFullSync: API error - $errorMessage")
             return SyncResult.Error(message = errorMessage, cachedData = cachedData)
         }

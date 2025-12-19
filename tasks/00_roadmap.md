@@ -19,10 +19,9 @@
     - Show "Last updated at …" and "Upload status: OK / Pending / Error"
 
 
+- [x] Handling editing and deletion of records
 
-## Sprint 2 - Add more metrics
-
-- [ ] Handling editing and deletion of records
+## Add more metrics
 
 - [ ] More daily tiles
 
@@ -41,27 +40,25 @@
 | **Exercise Sessions** | `ExerciseSessionRecord` | Workout details (see below) | various | High |
 
 **Exercise Session Data:**
-| Field | Description | Unit |
-|-------|-------------|------|
-| Exercise Type | Type of workout (running, cycling, etc.) | enum |
-| Start Time | When workout started | datetime |
-| End Time | When workout ended | datetime |
-| Duration | Total workout time | minutes |
-| Energy Burned | Calories burned during workout | kcal |
-| Total Distance | Total distance covered | meters |
-| Steps | Steps during workout | count |
-| Elevation Gain | Total elevation climbed | meters |
-| **Heart Rate Samples** | Raw HR readings during session | list |
-| ↳ Timestamp | When HR was recorded | datetime |
-| ↳ BPM | Heart rate value | bpm |
-| Pace Laps/Splits | Per-lap or per-km/mi pace splits | min/km |
-| Exercise Segments | Laps or intervals within session | list |
-| Exercise Route | GPS coordinates (if outdoor) | lat/lng |
-| Notes/Title | User notes or workout title | text |
-| **Swimming-Specific** | | |
-| ↳ Laps | Number of pool laps completed | count |
-| ↳ Stroke Count | Total strokes taken | count |
-| ↳ Stroke Type | Freestyle, backstroke, breaststroke, butterfly, mixed | enum |
+| Field | Source | Phase | Notes |
+|-------|--------|-------|-------|
+| id | `metadata.id` | 1 | Health Connect record ID |
+| Exercise Type | `ExerciseSessionRecord.exerciseType` | 1 | Enum |
+| Start Time | `ExerciseSessionRecord.startTime` | 1 | ISO 8601 |
+| End Time | `ExerciseSessionRecord.endTime` | 1 | ISO 8601 |
+| Source | `metadata.dataOrigin.packageName` | 1 | App that created record |
+| Duration | Stored or calculated | 1 | Minutes |
+| Title | `ExerciseSessionRecord.title` | 1 | Optional |
+| Notes | `ExerciseSessionRecord.notes` | 1 | Optional |
+| Energy Burned | Aggregation API (TotalCaloriesBurned) | 1 | kcal |
+| Total Distance | Aggregation API (Distance) | 1 | meters |
+| Steps | Aggregation API (Steps) | 1 | count |
+| Elevation Gain | Aggregation API (ElevationGained) | 1 | meters |
+| Average Heart Rate | Aggregation API (HeartRate AVG) | 1 | bpm |
+| Pace Laps | `ExerciseLap` records | 1 | List of laps |
+| **Heart Rate Samples** | `HeartRateRecord` (raw) | 2 | For zone calculation |
+| ↳ Timestamp | Sample time | 2 | ISO 8601 |
+| ↳ BPM | Heart rate value | 2 | bpm |
 
 **Exercise Session Types (Supported):**
 
@@ -69,6 +66,46 @@ Running, Walking, Hiking, Biking, Mountain Biking, Swimming (Pool), Swimming (Op
 
 
 
+
+
+### Sprint 2 Implementation Plan
+
+**Phase 1: Exercise Sessions (Aggregated Data)**
+Sync exercise sessions using Health Connect Aggregation API - no raw samples, small payloads.
+
+- [ ] Exercise Sessions (list of workouts)
+  - [ ] id (Health Connect record ID)
+  - [ ] Exercise Type (enum)
+  - [ ] Start Time / End Time
+  - [ ] Source (app that created the record)
+  - [ ] Duration (from record or endTime - startTime)
+  - [ ] Title / Notes
+  - [ ] **Aggregated metrics for session time range:**
+    - [ ] Energy Burned (TotalCaloriesBurnedRecord aggregation)
+    - [ ] Total Distance (DistanceRecord aggregation)
+    - [ ] Steps (StepsRecord aggregation)
+    - [ ] Elevation Gain (ElevationGainedRecord aggregation)
+    - [ ] Average Heart Rate (HeartRateRecord AVG aggregation)
+  - [ ] Pace Laps (ExerciseLap records - small, sync as-is)
+
+**Phase 2: Heart Rate Samples (for Zone Calculation)**
+Add raw HR samples so backend can calculate time in HR zones.
+
+- [ ] Heart Rate Samples during exercise session
+  - [ ] Timestamp
+  - [ ] BPM
+  - [ ] Backend calculates: time in light/moderate/vigorous/peak zones
+  - [ ] Backend stores zone times, discards raw samples
+
+**Phase 3: Daily Activity Metrics (if needed)**
+- [ ] Active Calories (daily total, outside of exercise sessions)
+- [ ] Distance (daily total, outside of exercise sessions)
+- [ ] Total Calories (daily total)
+
+**Deferred (Future Sprints):**
+- Exercise Route (GPS) - large payloads
+- Exercise Segments - complex
+- Swimming-specific data (laps, strokes)
 
 
 
@@ -92,34 +129,6 @@ Running, Walking, Hiking, Biking, Mountain Biking, Swimming (Pool), Swimming (Op
 | Body Temperature | `BodyTemperatureRecord` | Body temperature | °C | Low |
 | Blood Pressure | `BloodPressureRecord` | Systolic/diastolic | mmHg | Low |
 | Blood Glucose | `BloodGlucoseRecord` | Blood sugar levels | mg/dL | Low |
-
-
-
-
-
-### Sprint 2 Implementation Plan
-
-**Phase 1: Daily Activity Metrics**
-- [ ] Active Calories (daily total)
-- [ ] Distance (daily total)
-- [ ] Total Calories (daily total)
-
-**Phase 2: Exercise Sessions**
-- [ ] Exercise Sessions (list of workouts)
-  - [ ] Exercise Type
-  - [ ] Start/End Time
-  - [ ] Duration
-  - [ ] Energy burned (calories)
-  - [ ] Total Distance
-  - [ ] Steps
-  - [ ] Elevation gain
-  - [ ] Heart rate samples (raw data)
-  - [ ] Pace laps/splits
-  - [ ] Exercise segments
-  - [ ] Exercise route (GPS)
-  - [ ] Notes/Title
-  - [ ] Swimming: Laps, Stroke Count, Stroke Type
-
 
 
 

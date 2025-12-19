@@ -29,10 +29,10 @@ data class StepRecordData(
  */
 data class StepRecord(
     @SerializedName("id")
-    val id: String,  // Health Connect record ID
+    override val id: String,  // Health Connect record ID
 
     @SerializedName("type")
-    val type: String = "steps",
+    override val type: String = "steps",
 
     @SerializedName("date")
     val date: String,  // Format: "YYYY-MM-DD"
@@ -42,5 +42,5 @@ data class StepRecord(
 
     @SerializedName("data")
     val data: StepRecordData
-)
+) : SyncRecord
 

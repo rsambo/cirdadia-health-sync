@@ -34,7 +34,9 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.circadia.healthsync.data.HealthConnectManager
 import com.circadia.healthsync.ui.sync.SyncScreen
 import com.circadia.healthsync.ui.sync.SyncUiState
 import com.circadia.healthsync.ui.sync.SyncViewModel
@@ -42,10 +44,10 @@ import com.circadia.healthsync.ui.theme.CircadiaHealthSyncTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Permission request launcher
+    // Health Connect permission request launcher - uses the correct contract
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+        PermissionController.createRequestPermissionResultContract()
+    ) { grantedPermissions ->
         // Permission result will be checked by ViewModel on resume
     }
 
@@ -124,8 +126,13 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     SyncScreen(
                         viewModel = syncViewModel,
-                        onRequestPermission = { intent ->
-                            permissionLauncher.launch(intent)
+                        onRequestPermission = {
+                            try {
+                                permissionLauncher.launch(HealthConnectManager.PERMISSIONS)
+                            } catch (e: Exception) {
+                                android.util.Log.e("MainActivity", "Failed to launch permission request", e)
+                                Toast.makeText(context, "Failed to open Health Connect: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
                         },
                         onInstallHealthConnect = { intent ->
                             try {

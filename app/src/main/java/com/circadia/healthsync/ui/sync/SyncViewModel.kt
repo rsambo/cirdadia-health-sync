@@ -236,13 +236,27 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
      * Reads steps from Health Connect and sends to backend.
      */
     fun sync() {
+        Log.d(TAG, "sync: Called")
         // Prevent multiple syncs
-        if (isSyncing) return
+        if (isSyncing) {
+            Log.d(TAG, "sync: Already syncing, skipping")
+            return
+        }
 
         viewModelScope.launch {
+            Log.d(TAG, "sync: Checking permissions")
+            // Check permissions first
+            if (!healthConnectManager.hasAllPermissions()) {
+                Log.d(TAG, "sync: Permissions not granted, showing permission UI")
+                _uiState.value = SyncUiState.NoPermission
+                return@launch
+            }
+            Log.d(TAG, "sync: Permissions OK, starting sync")
+
             isSyncing = true
 
             val cachedData = syncRepository.getCachedData()
+            Log.d(TAG, "sync: Got cached data: ${cachedData != null}")
 
             // Set appropriate loading state based on cached data
             _uiState.value = if (cachedData != null) {
@@ -250,24 +264,36 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 SyncUiState.Syncing
             }
+            Log.d(TAG, "sync: Set UI state, calling performSync...")
 
             // Perform sync using repository
-            when (val result = syncRepository.performSync()) {
-                is SyncResult.Success -> {
-                    _uiState.value = SyncUiState.Success(cachedData = result.cachedData)
+            try {
+                when (val result = syncRepository.performSync()) {
+                    is SyncResult.Success -> {
+                        Log.d(TAG, "sync: Success!")
+                        _uiState.value = SyncUiState.Success(cachedData = result.cachedData)
 
-                    // Emit event if changes were detected
-                    emitSyncEvent(result.changes)
+                        // Emit event if changes were detected
+                        emitSyncEvent(result.changes)
+                    }
+                    is SyncResult.Error -> {
+                        Log.e(TAG, "sync: Error - ${result.message}")
+                        _uiState.value = SyncUiState.Error(
+                            message = result.message,
+                            cachedData = result.cachedData
+                        )
+                    }
                 }
-                is SyncResult.Error -> {
-                    _uiState.value = SyncUiState.Error(
-                        message = result.message,
-                        cachedData = result.cachedData
-                    )
-                }
+            } catch (e: Exception) {
+                Log.e(TAG, "sync: Exception during performSync", e)
+                _uiState.value = SyncUiState.Error(
+                    message = "Sync failed: ${e.message}",
+                    cachedData = cachedData
+                )
             }
 
             isSyncing = false
+            Log.d(TAG, "sync: Complete")
         }
     }
 
@@ -344,9 +370,18 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     fun forceFullSync() {
         if (isSyncing) return
 
-        Log.d(TAG, "forceFullSync: Clearing token and forcing full sync")
-        syncRepository.clearChangesToken()
-        sync()
+        viewModelScope.launch {
+            // Check permissions first
+            if (!healthConnectManager.hasAllPermissions()) {
+                Log.d(TAG, "forceFullSync: Permissions not granted, showing permission UI")
+                _uiState.value = SyncUiState.NoPermission
+                return@launch
+            }
+
+            Log.d(TAG, "forceFullSync: Clearing token and forcing full sync")
+            syncRepository.clearChangesToken()
+            sync()
+        }
     }
 }
 

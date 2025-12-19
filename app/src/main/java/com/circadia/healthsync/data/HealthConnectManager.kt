@@ -6,15 +6,24 @@ import android.net.Uri
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.changes.Change
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ElevationGainedRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord as HCExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.circadia.healthsync.data.model.ChangeResult
+import com.circadia.healthsync.data.model.ExerciseLap
+import com.circadia.healthsync.data.model.ExerciseSessionData
+import com.circadia.healthsync.data.model.ExerciseSessionRecord
+import com.circadia.healthsync.data.model.ExerciseTypeMapper
 import com.circadia.healthsync.data.model.StepRecord
 import com.circadia.healthsync.data.model.StepRecordData
 import java.time.Instant
@@ -25,7 +34,7 @@ import java.time.temporal.ChronoUnit
 
 /**
  * Manager class for interacting with Health Connect API.
- * Handles permission checking, step data reading, and aggregation.
+ * Handles permission checking, step data reading, exercise sessions, and aggregation.
  */
 class HealthConnectManager(private val context: Context) {
 
@@ -36,7 +45,12 @@ class HealthConnectManager(private val context: Context) {
 
         // Required permissions for this app
         val PERMISSIONS = setOf(
-            HealthPermission.getReadPermission(StepsRecord::class)
+            HealthPermission.getReadPermission(StepsRecord::class),
+            HealthPermission.getReadPermission(HCExerciseSessionRecord::class),
+            HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+            HealthPermission.getReadPermission(DistanceRecord::class),
+            HealthPermission.getReadPermission(ElevationGainedRecord::class),
+            HealthPermission.getReadPermission(HeartRateRecord::class)
         )
     }
 
@@ -220,7 +234,7 @@ class HealthConnectManager(private val context: Context) {
         val client = healthConnectClient ?: throw IllegalStateException("Health Connect not available")
 
         val request = ChangesTokenRequest(
-            recordTypes = setOf(StepsRecord::class)
+            recordTypes = setOf(StepsRecord::class, HCExerciseSessionRecord::class)
         )
 
         val token = client.getChangesToken(request)
@@ -239,7 +253,8 @@ class HealthConnectManager(private val context: Context) {
 
         Log.d(TAG, "getChanges: Fetching changes since token: ${token.take(20)}...")
 
-        val upsertedRecords = mutableListOf<StepRecord>()
+        val upsertedStepRecords = mutableListOf<StepRecord>()
+        val upsertedExerciseSessionRecords = mutableListOf<ExerciseSessionRecord>()
         val deletedRecordIds = mutableListOf<String>()
         var currentToken = token
         var hasMoreChanges = true
@@ -258,20 +273,31 @@ class HealthConnectManager(private val context: Context) {
                 when (change) {
                     is UpsertionChange -> {
                         val record = change.record
-                        if (record is StepsRecord) {
-                            val stepRecord = StepRecord(
-                                id = record.metadata.id,
-                                type = "steps",
-                                date = record.startTime.atZone(ZoneId.systemDefault())
-                                    .toLocalDate().format(dateFormatter),
-                                count = record.count,
-                                data = StepRecordData(
-                                    startTime = record.startTime.toString(),
-                                    endTime = record.endTime.toString()
+                        when (record) {
+                            is StepsRecord -> {
+                                val stepRecord = StepRecord(
+                                    id = record.metadata.id,
+                                    type = "steps",
+                                    date = record.startTime.atZone(ZoneId.systemDefault())
+                                        .toLocalDate().format(dateFormatter),
+                                    count = record.count,
+                                    data = StepRecordData(
+                                        startTime = record.startTime.toString(),
+                                        endTime = record.endTime.toString()
+                                    )
                                 )
-                            )
-                            upsertedRecords.add(stepRecord)
-                            Log.d(TAG, "getChanges: Upserted - ${stepRecord.count} steps on ${stepRecord.date} (ID: ${stepRecord.id})")
+                                upsertedStepRecords.add(stepRecord)
+                                Log.d(TAG, "getChanges: Upserted step - ${stepRecord.count} steps on ${stepRecord.date} (ID: ${stepRecord.id})")
+                            }
+                            is HCExerciseSessionRecord -> {
+                                try {
+                                    val exerciseRecord = buildExerciseSessionRecord(record)
+                                    upsertedExerciseSessionRecords.add(exerciseRecord)
+                                    Log.d(TAG, "getChanges: Upserted exercise - ${exerciseRecord.exerciseType} (ID: ${exerciseRecord.id})")
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "getChanges: Failed to process exercise session ${record.metadata.id}", e)
+                                }
+                            }
                         }
                     }
                     is DeletionChange -> {
@@ -289,10 +315,11 @@ class HealthConnectManager(private val context: Context) {
             }
         }
 
-        Log.d(TAG, "getChanges: Complete - ${upsertedRecords.size} upserts, ${deletedRecordIds.size} deletions")
+        Log.d(TAG, "getChanges: Complete - ${upsertedStepRecords.size} step upserts, ${upsertedExerciseSessionRecords.size} exercise upserts, ${deletedRecordIds.size} deletions")
 
         return ChangeResult(
-            upsertedRecords = upsertedRecords,
+            upsertedStepRecords = upsertedStepRecords,
+            upsertedExerciseSessionRecords = upsertedExerciseSessionRecords,
             deletedRecordIds = deletedRecordIds,
             nextToken = currentToken
         )
@@ -341,6 +368,130 @@ class HealthConnectManager(private val context: Context) {
         return stepRecords
     }
 
+    // ==================== Exercise Sessions ====================
+
+    /**
+     * Read all exercise sessions from the last 30 days with aggregated metrics.
+     * @return List of ExerciseSessionRecord with aggregated data
+     */
+    suspend fun readExerciseSessionsWithIds(): List<ExerciseSessionRecord> {
+        val client = healthConnectClient ?: throw IllegalStateException("Health Connect not available")
+
+        val endTime = Instant.now()
+        val startTime = endTime.minus(30, ChronoUnit.DAYS)
+
+        Log.d(TAG, "readExerciseSessionsWithIds: Querying ALL exercise types from $startTime to $endTime")
+
+        val request = ReadRecordsRequest(
+            recordType = HCExerciseSessionRecord::class,
+            timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+        )
+
+        val response = client.readRecords(request)
+        Log.d(TAG, "readExerciseSessionsWithIds: Health Connect returned ${response.records.size} exercise sessions")
+
+        // Log all raw exercise sessions from Health Connect before processing
+        response.records.forEachIndexed { index, record ->
+            Log.d(TAG, "  Raw[$index]: type=${record.exerciseType}, title=${record.title}, " +
+                    "start=${record.startTime}, end=${record.endTime}, id=${record.metadata.id}, " +
+                    "source=${record.metadata.dataOrigin.packageName}")
+        }
+
+        val exerciseRecords = response.records.mapNotNull { record ->
+            try {
+                buildExerciseSessionRecord(record)
+            } catch (e: Exception) {
+                Log.e(TAG, "readExerciseSessionsWithIds: Failed to process exercise session ${record.metadata.id}", e)
+                null
+            }
+        }
+
+        Log.d(TAG, "readExerciseSessionsWithIds: Converted to ${exerciseRecords.size} ExerciseSessionRecords")
+        exerciseRecords.forEach { record ->
+            Log.d(TAG, "  ${record.exerciseType}: ${record.startTime} - ${record.endTime} (ID: ${record.id})")
+        }
+
+        return exerciseRecords
+    }
+
+    /**
+     * Build an ExerciseSessionRecord from a Health Connect record with aggregated metrics.
+     */
+    private suspend fun buildExerciseSessionRecord(record: HCExerciseSessionRecord): ExerciseSessionRecord {
+        val metrics = aggregateMetricsForSession(record.startTime, record.endTime)
+
+        // Get laps directly from the exercise session record
+        val laps = record.laps.map { lap ->
+            ExerciseLap(
+                startTime = lap.startTime.toString(),
+                endTime = lap.endTime.toString()
+            )
+        }
+
+        return ExerciseSessionRecord(
+            id = record.metadata.id,
+            type = "exercise_session",
+            exerciseType = ExerciseTypeMapper.fromHealthConnect(record.exerciseType),
+            startTime = record.startTime.toString(),
+            endTime = record.endTime.toString(),
+            source = record.metadata.dataOrigin.packageName,
+            title = record.title,
+            notes = record.notes,
+            data = ExerciseSessionData(
+                energyBurned = metrics.energyBurned,
+                totalDistance = metrics.totalDistance,
+                steps = metrics.steps,
+                elevationGain = metrics.elevationGain,
+                avgHeartRate = metrics.avgHeartRate,
+                laps = laps.ifEmpty { null }
+            )
+        )
+    }
+
+    /**
+     * Aggregate metrics for a given time range (exercise session).
+     */
+    private suspend fun aggregateMetricsForSession(startTime: Instant, endTime: Instant): AggregatedMetrics {
+        val client = healthConnectClient ?: throw IllegalStateException("Health Connect not available")
+
+        Log.d(TAG, "aggregateMetricsForSession: Aggregating from $startTime to $endTime")
+
+        val request = AggregateRequest(
+            metrics = setOf(
+                TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+                DistanceRecord.DISTANCE_TOTAL,
+                StepsRecord.COUNT_TOTAL,
+                ElevationGainedRecord.ELEVATION_GAINED_TOTAL,
+                HeartRateRecord.BPM_AVG
+            ),
+            timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+        )
+
+        return try {
+            val result = client.aggregate(request)
+
+            val energyBurned = result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
+            val totalDistance = result[DistanceRecord.DISTANCE_TOTAL]?.inMeters
+            val steps = result[StepsRecord.COUNT_TOTAL]
+            val elevationGain = result[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
+            val avgHeartRate = result[HeartRateRecord.BPM_AVG]?.toDouble()
+
+            Log.d(TAG, "aggregateMetricsForSession: calories=$energyBurned, distance=$totalDistance, steps=$steps, elevation=$elevationGain, avgHR=$avgHeartRate")
+
+            AggregatedMetrics(
+                energyBurned = energyBurned,
+                totalDistance = totalDistance,
+                steps = steps,
+                elevationGain = elevationGain,
+                avgHeartRate = avgHeartRate
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "aggregateMetricsForSession: Failed to aggregate", e)
+            AggregatedMetrics()
+        }
+    }
+
+
     /**
      * Get the intent to install Health Connect from Play Store.
      */
@@ -351,6 +502,17 @@ class HealthConnectManager(private val context: Context) {
         }
     }
 }
+
+/**
+ * Internal data class for holding aggregated metrics.
+ */
+private data class AggregatedMetrics(
+    val energyBurned: Double? = null,
+    val totalDistance: Double? = null,
+    val steps: Long? = null,
+    val elevationGain: Double? = null,
+    val avgHeartRate: Double? = null
+)
 
 /**
  * Exception thrown when the Health Connect changes token has expired.

@@ -5,10 +5,13 @@ package com.circadia.healthsync.data.model
  * Contains upserted records (new/updated) and deleted record IDs.
  */
 data class ChangeResult(
-    /** Records that were added or updated */
-    val upsertedRecords: List<StepRecord>,
+    /** Step records that were added or updated */
+    val upsertedStepRecords: List<StepRecord>,
 
-    /** IDs of records that were deleted */
+    /** Exercise session records that were added or updated */
+    val upsertedExerciseSessionRecords: List<ExerciseSessionRecord>,
+
+    /** IDs of records that were deleted (both steps and exercise sessions) */
     val deletedRecordIds: List<String>,
 
     /** New changes token to use for next sync */
@@ -17,9 +20,13 @@ data class ChangeResult(
     /** Whether there are more changes to fetch */
     val hasMoreChanges: Boolean = false
 ) {
+    /** All upserted records combined */
+    val allUpsertedRecords: List<SyncRecord>
+        get() = upsertedStepRecords + upsertedExerciseSessionRecords
+
     /** Total number of changes detected */
     val totalChanges: Int
-        get() = upsertedRecords.size + deletedRecordIds.size
+        get() = upsertedStepRecords.size + upsertedExerciseSessionRecords.size + deletedRecordIds.size
 
     /** Whether any changes were detected */
     val hasChanges: Boolean
